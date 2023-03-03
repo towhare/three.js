@@ -1,22 +1,40 @@
 import NodeUniform from './NodeUniform.js';
 import NodeAttribute from './NodeAttribute.js';
-import NodeVary from './NodeVary.js';
+import NodeVarying from './NodeVarying.js';
 import NodeVar from './NodeVar.js';
 import NodeCode from './NodeCode.js';
 import NodeKeywords from './NodeKeywords.js';
 import { NodeUpdateType } from './constants.js';
 
-import { REVISION, LinearEncoding } from 'three';
+import { REVISION, LinearEncoding, Color, Vector2, Vector3, Vector4 } from 'three';
 
-export const shaderStages = [ 'fragment', 'vertex' ];
+export const defaultShaderStages = [ 'fragment', 'vertex' ];
+export const shaderStages = [ ...defaultShaderStages, 'compute' ];
 export const vector = [ 'x', 'y', 'z', 'w' ];
+
+const typeFromLength = new Map();
+typeFromLength.set( 1, 'float' );
+typeFromLength.set( 2, 'vec2' );
+typeFromLength.set( 3, 'vec3' );
+typeFromLength.set( 4, 'vec4' );
+typeFromLength.set( 9, 'mat3' );
+typeFromLength.set( 16, 'mat4' );
+
+const toFloat = ( value ) => {
+
+	value = Number( value );
+
+	return value + ( value % 1 ? '' : '.0' );
+
+};
 
 class NodeBuilder {
 
 	constructor( object, renderer, parser ) {
 
 		this.object = object;
-		this.material = object.material;
+		this.material = object.material || null;
+		this.geometry = object.geometry || null;
 		this.renderer = renderer;
 		this.parser = parser;
 
@@ -24,16 +42,21 @@ class NodeBuilder {
 		this.updateNodes = [];
 		this.hashNodes = {};
 
+		this.scene = null;
+		this.lightsNode = null;
+		this.fogNode = null;
+
 		this.vertexShader = null;
 		this.fragmentShader = null;
+		this.computeShader = null;
 
-		this.flowNodes = { vertex: [], fragment: [] };
-		this.flowCode = { vertex: '', fragment: '' };
-		this.uniforms = { vertex: [], fragment: [], index: 0 };
-		this.codes = { vertex: [], fragment: [] };
+		this.flowNodes = { vertex: [], fragment: [], compute: [] };
+		this.flowCode = { vertex: '', fragment: '', compute: [] };
+		this.uniforms = { vertex: [], fragment: [], compute: [], index: 0 };
+		this.codes = { vertex: [], fragment: [], compute: [] };
 		this.attributes = [];
-		this.varys = [];
-		this.vars = { vertex: [], fragment: [] };
+		this.varyings = [];
+		this.vars = { vertex: [], fragment: [], compute: [] };
 		this.flow = { code: '' };
 		this.stack = [];
 
@@ -46,7 +69,13 @@ class NodeBuilder {
 		this.flowsData = new WeakMap();
 
 		this.shaderStage = null;
-		this.node = null;
+		this.buildStage = null;
+
+	}
+
+	get node() {
+
+		return this.stack[ this.stack.length - 1 ];
 
 	}
 
@@ -88,7 +117,7 @@ class NodeBuilder {
 
 			const updateType = node.getUpdateType( this );
 
-			if ( updateType !== NodeUpdateType.None ) {
+			if ( updateType !== NodeUpdateType.NONE ) {
 
 				this.updateNodes.push( node );
 
@@ -134,26 +163,91 @@ class NodeBuilder {
 
 	}
 
-	getTexture( /* textureProperty, uvSnippet, biasSnippet = null */ ) {
+	isAvailable( /*name*/ ) {
+
+		return false;
+
+	}
+
+	getInstanceIndex() {
 
 		console.warn( 'Abstract function.' );
 
 	}
 
-	getCubeTexture( /* textureProperty, uvSnippet, biasSnippet = null */ ) {
+	getFrontFacing() {
 
 		console.warn( 'Abstract function.' );
 
 	}
 
-	// rename to generate
-	getConst( type, value ) {
+	getTexture( /* textureProperty, uvSnippet */ ) {
 
-		if ( type === 'float' ) return value + ( value % 1 ? '' : '.0' );
-		if ( type === 'vec2' ) return `${ this.getType( 'vec2' ) }( ${value.x}, ${value.y} )`;
-		if ( type === 'vec3' ) return `${ this.getType( 'vec3' ) }( ${value.x}, ${value.y}, ${value.z} )`;
-		if ( type === 'vec4' ) return `${ this.getType( 'vec4' ) }( ${value.x}, ${value.y}, ${value.z}, ${value.w} )`;
-		if ( type === 'color' ) return `${ this.getType( 'vec3' ) }( ${value.r}, ${value.g}, ${value.b} )`;
+		console.warn( 'Abstract function.' );
+
+	}
+
+	getTextureLevel( /* textureProperty, uvSnippet, levelSnippet */ ) {
+
+		console.warn( 'Abstract function.' );
+
+	}
+
+	getCubeTexture( /* textureProperty, uvSnippet */ ) {
+
+		console.warn( 'Abstract function.' );
+
+	}
+
+	getCubeTextureLevel( /* textureProperty, uvSnippet, levelSnippet */ ) {
+
+		console.warn( 'Abstract function.' );
+
+	}
+
+	// @TODO: rename to .generateConst()
+	getConst( type, value = null ) {
+
+		if ( value === null ) {
+
+			if ( type === 'float' || type === 'int' || type === 'uint' ) value = 0;
+			else if ( type === 'bool' ) value = false;
+			else if ( type === 'color' ) value = new Color();
+			else if ( type === 'vec2' ) value = new Vector2();
+			else if ( type === 'vec3' ) value = new Vector3();
+			else if ( type === 'vec4' ) value = new Vector4();
+
+		}
+
+		if ( type === 'float' ) return toFloat( value );
+		if ( type === 'int' ) return `${ Math.round( value ) }`;
+		if ( type === 'uint' ) return value >= 0 ? `${ Math.round( value ) }u` : '0u';
+		if ( type === 'bool' ) return value ? 'true' : 'false';
+		if ( type === 'color' ) return `${ this.getType( 'vec3' ) }( ${ toFloat( value.r ) }, ${ toFloat( value.g ) }, ${ toFloat( value.b ) } )`;
+
+		const typeLength = this.getTypeLength( type );
+
+		const componentType = this.getComponentType( type );
+
+		const getConst = value => this.getConst( componentType, value );
+
+		if ( typeLength === 2 ) {
+
+			return `${ this.getType( type ) }( ${ getConst( value.x ) }, ${ getConst( value.y ) } )`;
+
+		} else if ( typeLength === 3 ) {
+
+			return `${ this.getType( type ) }( ${ getConst( value.x ) }, ${ getConst( value.y ) }, ${ getConst( value.z ) } )`;
+
+		} else if ( typeLength === 4 ) {
+
+			return `${ this.getType( type ) }( ${ getConst( value.x ) }, ${ getConst( value.y ) }, ${ getConst( value.z ) }, ${ getConst( value.w ) } )`;
+
+		} else if ( typeLength > 4 ) {
+
+			return `${ this.getType( type ) }()`;
+
+		}
 
 		throw new Error( `NodeBuilder: Type '${type}' not found in generate constant attempt.` );
 
@@ -168,6 +262,12 @@ class NodeBuilder {
 	generateMethod( method ) {
 
 		return method;
+
+	}
+
+	hasGeometryAttribute( name ) {
+
+		return this.geometry?.getAttribute( name ) !== undefined;
 
 	}
 
@@ -215,6 +315,12 @@ class NodeBuilder {
 
 	}
 
+	isReference( type ) {
+
+		return type === 'void' || type === 'property' || type === 'sampler' || type === 'texture' || type === 'cubeTexture';
+
+	}
+
 	isShaderStage( shaderStage ) {
 
 		return this.shaderStage === shaderStage;
@@ -243,6 +349,22 @@ class NodeBuilder {
 
 	}
 
+	getComponentType( type ) {
+
+		type = this.getVectorType( type );
+
+		const componentType = /(b|i|u|)(vec|mat)([2-4])/.exec( type );
+
+		if ( componentType === null ) return null;
+
+		if ( componentType[ 1 ] === 'b' ) return 'bool';
+		if ( componentType[ 1 ] === 'i' ) return 'int';
+		if ( componentType[ 1 ] === 'u' ) return 'uint';
+
+		return 'float';
+
+	}
+
 	getVectorType( type ) {
 
 		if ( type === 'color' ) return 'vec3';
@@ -252,14 +374,9 @@ class NodeBuilder {
 
 	}
 
-	getTypeFromLength( type ) {
+	getTypeFromLength( length ) {
 
-		if ( type === 1 ) return 'float';
-		if ( type === 2 ) return 'vec2';
-		if ( type === 3 ) return 'vec3';
-		if ( type === 4 ) return 'vec4';
-
-		return 0;
+		return typeFromLength.get( length );
 
 	}
 
@@ -269,7 +386,9 @@ class NodeBuilder {
 		const vecNum = /vec([2-4])/.exec( vecType );
 
 		if ( vecNum !== null ) return Number( vecNum[ 1 ] );
-		if ( vecType === 'float' || vecType === 'bool' ) return 1;
+		if ( vecType === 'float' || vecType === 'bool' || vecType === 'int' || vecType === 'uint' ) return 1;
+		if ( /mat3/.test( type ) === true ) return 9;
+		if ( /mat4/.test( type ) === true ) return 16;
 
 		return 0;
 
@@ -277,7 +396,7 @@ class NodeBuilder {
 
 	getVectorFromMatrix( type ) {
 
-		return 'vec' + type.slice( 3 );
+		return type.replace( 'mat', 'vec' );
 
 	}
 
@@ -287,13 +406,25 @@ class NodeBuilder {
 
 		if ( nodeData === undefined ) {
 
-			nodeData = { vertex: {}, fragment: {} };
+			nodeData = { vertex: {}, fragment: {}, compute: {} };
 
 			this.nodesData.set( node, nodeData );
 
 		}
 
 		return shaderStage !== null ? nodeData[ shaderStage ] : nodeData;
+
+	}
+
+	getNodeProperties( node, shaderStage = this.shaderStage ) {
+
+		const nodeData = this.getDataFromNode( this, shaderStage );
+		const constructHash = node.getConstructHash( this );
+
+		nodeData.properties = nodeData.properties || {};
+		nodeData.properties[ constructHash ] = nodeData.properties[ constructHash ] || { outputNode: null };
+
+		return nodeData.properties[ constructHash ];
 
 	}
 
@@ -342,26 +473,26 @@ class NodeBuilder {
 
 	}
 
-	getVaryFromNode( node, type ) {
+	getVaryingFromNode( node, type ) {
 
 		const nodeData = this.getDataFromNode( node, null );
 
-		let nodeVary = nodeData.vary;
+		let nodeVarying = nodeData.varying;
 
-		if ( nodeVary === undefined ) {
+		if ( nodeVarying === undefined ) {
 
-			const varys = this.varys;
-			const index = varys.length;
+			const varyings = this.varyings;
+			const index = varyings.length;
 
-			nodeVary = new NodeVary( 'nodeVary' + index, type );
+			nodeVarying = new NodeVarying( 'nodeVarying' + index, type );
 
-			varys.push( nodeVary );
+			varyings.push( nodeVarying );
 
-			nodeData.vary = nodeVary;
+			nodeData.varying = nodeVarying;
 
 		}
 
-		return nodeVary;
+		return nodeVarying;
 
 	}
 
@@ -394,7 +525,7 @@ class NodeBuilder {
 
 	}
 
-	getFlowData( shaderStage, node ) {
+	getFlowData( node/*, shaderStage*/ ) {
 
 		return this.flowsData.get( node );
 
@@ -402,15 +533,11 @@ class NodeBuilder {
 
 	flowNode( node ) {
 
-		this.node = node;
-
 		const output = node.getNodeType( this );
 
 		const flowData = this.flowChildNode( node, output );
 
 		this.flowsData.set( node, flowData );
-
-		this.node = null;
 
 		return flowData;
 
@@ -462,7 +589,7 @@ class NodeBuilder {
 
 	}
 
-	getVarys( /*shaderStage*/ ) {
+	getVaryings( /*shaderStage*/ ) {
 
 		console.warn( 'Abstract function.' );
 
@@ -474,9 +601,7 @@ class NodeBuilder {
 
 		const vars = this.vars[ shaderStage ];
 
-		for ( let index = 0; index < vars.length; index ++ ) {
-
-			const variable = vars[ index ];
+		for ( const variable of vars ) {
 
 			snippet += `${variable.type} ${variable.name}; `;
 
@@ -510,7 +635,13 @@ class NodeBuilder {
 
 	getHash() {
 
-		return this.vertexShader + this.fragmentShader;
+		return this.vertexShader + this.fragmentShader + this.computeShader;
+
+	}
+
+	setShaderStage( shaderStage ) {
+
+		this.shaderStage = shaderStage;
 
 	}
 
@@ -520,9 +651,15 @@ class NodeBuilder {
 
 	}
 
-	setShaderStage( shaderStage ) {
+	setBuildStage( buildStage ) {
 
-		this.shaderStage = shaderStage;
+		this.buildStage = buildStage;
+
+	}
+
+	getBuildStage() {
+
+		return this.buildStage;
 
 	}
 
@@ -534,7 +671,9 @@ class NodeBuilder {
 
 	build() {
 
-		// stage 1: analyze nodes to possible optimization and validation
+		// stage 1: generate shader node
+
+		this.setBuildStage( 'construct' );
 
 		for ( const shaderStage of shaderStages ) {
 
@@ -544,13 +683,33 @@ class NodeBuilder {
 
 			for ( const node of flowNodes ) {
 
-				node.analyze( this );
+				node.build( this );
 
 			}
 
 		}
 
-		// stage 2: pre-build vertex code used in fragment shader
+		// stage 2: analyze nodes to possible optimization and validation
+
+		this.setBuildStage( 'analyze' );
+
+		for ( const shaderStage of shaderStages ) {
+
+			this.setShaderStage( shaderStage );
+
+			const flowNodes = this.flowNodes[ shaderStage ];
+
+			for ( const node of flowNodes ) {
+
+				node.build( this );
+
+			}
+
+		}
+
+		// stage 3: pre-build vertex code used in fragment shader
+
+		this.setBuildStage( 'generate' );
 
 		if ( this.context.vertex && this.context.vertex.isNode ) {
 
@@ -558,7 +717,9 @@ class NodeBuilder {
 
 		}
 
-		// stage 3: generate shader
+		// stage 4: generate shader
+
+		this.setBuildStage( 'generate' );
 
 		for ( const shaderStage of shaderStages ) {
 
@@ -568,15 +729,16 @@ class NodeBuilder {
 
 			for ( const node of flowNodes ) {
 
-				this.flowNode( node, shaderStage );
+				this.flowNode( node );
 
 			}
 
 		}
 
+		this.setBuildStage( null );
 		this.setShaderStage( null );
 
-		// stage 4: build code for a specific output
+		// stage 5: build code for a specific output
 
 		this.buildCode();
 
@@ -589,50 +751,56 @@ class NodeBuilder {
 		fromType = this.getVectorType( fromType );
 		toType = this.getVectorType( toType );
 
-		const typeToType = `${fromType} to ${toType}`;
+		if ( fromType === toType || toType === null || this.isReference( toType ) ) {
 
-		switch ( typeToType ) {
-
-			case 'int to float' : return `${ this.getType( 'float' ) }( ${ snippet } )`;
-			case 'int to vec2' : return `${ this.getType( 'vec2' ) }( ${ this.getType( 'float' ) }( ${ snippet } ) )`;
-			case 'int to vec3' : return `${ this.getType( 'vec3' ) }( ${ this.getType( 'float' ) }( ${ snippet } ) )`;
-			case 'int to vec4' : return `${ this.getType( 'vec4' ) }( ${ this.getType( 'vec3' ) }( ${ this.getType( 'float' ) }( ${ snippet } ) ), 1.0 )`;
-
-			case 'float to int' : return `${ this.getType( 'int' ) }( ${ snippet } )`;
-			case 'float to vec2' : return `${ this.getType( 'vec2' ) }( ${ snippet } )`;
-			case 'float to vec3' : return `${ this.getType( 'vec3' ) }( ${ snippet } )`;
-			case 'float to vec4' : return `${ this.getType( 'vec4' ) }( ${ this.getType( 'vec3' ) }( ${ snippet } ), 1.0 )`;
-
-			case 'vec2 to int' : return `${ this.getType( 'int' ) }( ${ snippet }.x )`;
-			case 'vec2 to float' : return `${ snippet }.x`;
-			case 'vec2 to vec3' : return `${ this.getType( 'vec3' ) }( ${ snippet }, 0.0 )`;
-			case 'vec2 to vec4' : return `${ this.getType( 'vec4' ) }( ${ snippet }.xy, 0.0, 1.0 )`;
-
-			case 'vec3 to int' : return `${ this.getType( 'int' ) }( ${ snippet }.x )`;
-			case 'vec3 to float' : return `${ snippet }.x`;
-			case 'vec3 to vec2' : return `${ snippet }.xy`;
-			case 'vec3 to vec4' : return `${ this.getType( 'vec4' ) }( ${ snippet }, 1.0 )`;
-
-			case 'vec4 to int' : return `${ this.getType( 'int' ) }( ${ snippet }.x )`;
-			case 'vec4 to float' : return `${ snippet }.x`;
-			case 'vec4 to vec2' : return `${ snippet }.xy`;
-			case 'vec4 to vec3' : return `${ snippet }.xyz`;
-
-			case 'mat3 to int' : return `${ this.getType( 'int' ) }( ${ snippet } * ${ this.getType( 'vec3' ) }( 1.0 ) ).x`;
-			case 'mat3 to float' : return `( ${ snippet } * ${ this.getType( 'vec3' ) }( 1.0 ) ).x`;
-			case 'mat3 to vec2' : return `( ${ snippet } * ${ this.getType( 'vec3' ) }( 1.0 ) ).xy`;
-			case 'mat3 to vec3' : return `( ${ snippet } * ${ this.getType( 'vec3' ) }( 1.0 ) ).xyz`;
-			case 'mat3 to vec4' : return `${ this.getType( 'vec4' ) }( ${ snippet } * ${ this.getType( 'vec3' ) }( 1.0 ), 1.0 )`;
-
-			case 'mat4 to int' : return `${ this.getType( 'int' ) }( ${ snippet } * ${ this.getType( 'vec4' ) }( 1.0 ) ).x`;
-			case 'mat4 to float' : return `( ${ snippet } * ${ this.getType( 'vec4' ) }( 1.0 ) ).x`;
-			case 'mat4 to vec2' : return `( ${ snippet } * ${ this.getType( 'vec4' ) }( 1.0 ) ).xy`;
-			case 'mat4 to vec3' : return `( ${ snippet } * ${ this.getType( 'vec4' ) }( 1.0 ) ).xyz`;
-			case 'mat4 to vec4' : return `( ${ snippet } * ${ this.getType( 'vec4' ) }( 1.0 ) )`;
+			return snippet;
 
 		}
 
-		return snippet;
+		const fromTypeLength = this.getTypeLength( fromType );
+		const toTypeLength = this.getTypeLength( toType );
+
+		if ( fromTypeLength > 4 ) { // fromType is matrix-like
+
+			// @TODO: ignore for now
+
+			return snippet;
+
+		}
+
+		if ( toTypeLength > 4 || toTypeLength === 0 ) { // toType is matrix-like or unknown
+
+			// @TODO: ignore for now
+
+			return snippet;
+
+		}
+
+		if ( fromTypeLength === toTypeLength ) {
+
+			return `${ this.getType( toType ) }( ${ snippet } )`;
+
+		}
+
+		if ( fromTypeLength > toTypeLength ) {
+
+			return this.format( `${ snippet }.${ 'xyz'.slice( 0, toTypeLength ) }`, this.getTypeFromLength( toTypeLength ), toType );
+
+		}
+
+		if ( toTypeLength === 4 ) { // toType is vec4-like
+
+			return `${ this.getType( toType ) }( ${ this.format( snippet, fromType, 'vec3' ) }, 1.0 )`;
+
+		}
+
+		if ( fromTypeLength === 2 ) { // fromType is vec2-like and toType is vec3-like
+
+			return `${ this.getType( toType ) }( ${ this.format( snippet, fromType, 'vec2' ) }, 0.0 )`;
+
+		}
+
+		return `${ this.getType( toType ) }( ${ snippet } )`; // fromType is float-like
 
 	}
 

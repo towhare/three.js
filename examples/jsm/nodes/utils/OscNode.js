@@ -1,6 +1,6 @@
 import Node from '../core/Node.js';
 import TimerNode from './TimerNode.js';
-import { abs, fract, round, sin, add, sub, mul, PI2 } from '../ShaderNode.js';
+import { abs, fract, round, sin, add, sub, mul } from '../shadernode/ShaderNodeBaseElements.js';
 
 class OscNode extends Node {
 
@@ -24,7 +24,7 @@ class OscNode extends Node {
 
 	}
 
-	generate( builder ) {
+	construct() {
 
 		const method = this.method;
 		const timeNode = this.timeNode;
@@ -33,7 +33,7 @@ class OscNode extends Node {
 
 		if ( method === OscNode.SINE ) {
 
-			outputNode = add( mul( sin( mul( add( timeNode, .75 ), PI2 ) ), .5 ), .5 );
+			outputNode = add( mul( sin( mul( add( timeNode, .75 ), Math.PI * 2 ) ), .5 ), .5 );
 
 		} else if ( method === OscNode.SQUARE ) {
 
@@ -49,7 +49,7 @@ class OscNode extends Node {
 
 		}
 
-		return outputNode.build( builder );
+		return outputNode;
 
 	}
 

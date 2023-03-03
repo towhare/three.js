@@ -1,23 +1,39 @@
-import FloatNode from '../inputs/FloatNode.js';
+import UniformNode from '../core/UniformNode.js';
 import { NodeUpdateType } from '../core/constants.js';
 
-class TimerNode extends FloatNode {
+class TimerNode extends UniformNode {
 
 	static LOCAL = 'local';
 	static GLOBAL = 'global';
 	static DELTA = 'delta';
+	static FRAME = 'frame';
 
-	constructor( scope = TimerNode.LOCAL ) {
+	constructor( scope = TimerNode.LOCAL, scale = 1, value = 0 ) {
 
-		super();
+		super( value );
 
 		this.scope = scope;
-		this.scale = 1;
+		this.scale = scale;
 
-		this.updateType = NodeUpdateType.Frame;
+		this.updateType = NodeUpdateType.FRAME;
 
 	}
+/*
+	@TODO:
+	getNodeType( builder ) {
 
+		const scope = this.scope;
+
+		if ( scope === TimerNode.FRAME ) {
+
+			return 'uint';
+
+		}
+
+		return 'float';
+
+	}
+*/
 	update( frame ) {
 
 		const scope = this.scope;
@@ -30,6 +46,10 @@ class TimerNode extends FloatNode {
 		} else if ( scope === TimerNode.DELTA ) {
 
 			this.value = frame.deltaTime * scale;
+
+		} else if ( scope === TimerNode.FRAME ) {
+
+			this.value = frame.frameId;
 
 		} else {
 

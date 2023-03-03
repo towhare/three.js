@@ -1,14 +1,5 @@
-import PositionNode from '../accessors/PositionNode.js';
-import NormalNode from '../accessors/NormalNode.js';
-import UVNode from '../accessors/UVNode.js';
-import MathNode from '../math/MathNode.js';
-import OperatorNode from '../math/OperatorNode.js';
-import FloatNode from '../inputs/FloatNode.js';
 import TempNode from '../core/TempNode.js';
-import ModelNode from '../accessors/ModelNode.js';
-import SplitNode from '../utils/SplitNode.js';
-import JoinNode from '../utils/JoinNode.js';
-import { ShaderNode, cond, add, mul, dFdx, dFdy, cross, max, dot, normalize, inversesqrt, equal } from '../ShaderNode.js';
+import { ShaderNode, positionView, normalView, uv, vec3, add, sub, mul, dFdx, dFdy, cross, max, dot, normalize, inversesqrt, faceDirection, modelNormalMatrix, TBNViewMatrix } from '../shadernode/ShaderNodeBaseElements.js';
 
 import { TangentSpaceNormalMap, ObjectSpaceNormalMap } from 'three';
 
@@ -17,7 +8,7 @@ import { TangentSpaceNormalMap, ObjectSpaceNormalMap } from 'three';
 
 const perturbNormal2ArbNode = new ShaderNode( ( inputs ) => {
 
-	const { eye_pos, surf_norm, mapN, faceDirection, uv } = inputs;
+	const { eye_pos, surf_norm, mapN, uv } = inputs;
 
 	const q0 = dFdx( eye_pos.xyz );
 	const q1 = dFdy( eye_pos.xyz );
@@ -33,7 +24,7 @@ const perturbNormal2ArbNode = new ShaderNode( ( inputs ) => {
 	const B = add( mul( q1perp, st0.y ), mul( q0perp, st1.y ) );
 
 	const det = max( dot( T, T ), dot( B, B ) );
-	const scale = cond( equal( det, 0 ), 0, mul( faceDirection, inversesqrt( det ) ) );
+	const scale = mul( faceDirection, inversesqrt( det ) );
 
 	return normalize( add( mul( T, mul( mapN.x, scale ) ), mul( B, mul( mapN.y, scale ) ), mul( N, mapN.z ) ) );
 
@@ -52,43 +43,48 @@ class NormalMapNode extends TempNode {
 
 	}
 
-	generate( builder ) {
-
-		const type = this.getNodeType( builder );
+	construct( builder ) {
 
 		const { normalMapType, scaleNode } = this;
 
-		const normalOP = new OperatorNode( '*', this.node, new FloatNode( 2.0 ).setConst( true ) );
-		let normalMap = new OperatorNode( '-', normalOP, new FloatNode( 1.0 ).setConst( true ) );
+		const normalOP = mul( this.node, 2.0 );
+		let normalMap = sub( normalOP, 1.0 );
 
 		if ( scaleNode !== null ) {
 
-			const normalMapScale = new OperatorNode( '*', new SplitNode( normalMap, 'xy'), scaleNode );
-			normalMap = new JoinNode( [ normalMapScale, new SplitNode( normalMap, 'z' ) ] );
+			const normalMapScale = mul( normalMap.xy, scaleNode );
+			normalMap = vec3( normalMapScale, normalMap.z );
 
 		}
+
+		let outputNode = null;
 
 		if ( normalMapType === ObjectSpaceNormalMap ) {
 
-			const vertexNormalNode = new OperatorNode( '*', new ModelNode( ModelNode.NORMAL_MATRIX ), normalMap );
-
-			const normal = new MathNode( MathNode.NORMALIZE, vertexNormalNode );
-
-			return normal.build( builder, type );
+			outputNode = normalize( mul( modelNormalMatrix, normalMap ) );
 
 		} else if ( normalMapType === TangentSpaceNormalMap ) {
 
-			const perturbNormal2ArbCall = perturbNormal2ArbNode( {
-				eye_pos: new PositionNode( PositionNode.VIEW ),
-				surf_norm: new NormalNode( NormalNode.VIEW ),
-				mapN: normalMap,
-				faceDirection: new FloatNode( 1.0 ).setConst( true ),
-				uv: new UVNode()
-			} );
+			const tangent = builder.hasGeometryAttribute( 'tangent' );
 
-			return perturbNormal2ArbCall.build( builder, type );
+			if ( tangent === true ) {
+
+				outputNode = normalize( mul( TBNViewMatrix, normalMap ) );
+
+			} else {
+
+				outputNode = perturbNormal2ArbNode.call( {
+					eye_pos: positionView,
+					surf_norm: normalView,
+					mapN: normalMap,
+					uv: uv()
+				} );
+
+			}
 
 		}
+
+		return outputNode;
 
 	}
 

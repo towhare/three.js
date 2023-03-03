@@ -11,20 +11,34 @@ class ConvertNode extends Node {
 
 	}
 
-	getNodeType( /*builder*/ ) {
+	getNodeType( builder ) {
 
-		return this.convertTo;
+		const requestType = this.node.getNodeType( builder );
+
+		let convertTo = null;
+
+		for ( const overloadingType of this.convertTo.split( '|' ) ) {
+
+			if ( convertTo === null || builder.getTypeLength( requestType ) === builder.getTypeLength( overloadingType ) ) {
+
+				convertTo = overloadingType;
+
+			}
+
+		}
+
+		return convertTo;
 
 	}
 
-	generate( builder ) {
+	generate( builder, output ) {
 
-		const convertTo = this.convertTo;
+		const node = this.node;
+		const type = this.getNodeType( builder );
 
-		const convertToSnippet = builder.getType( convertTo );
-		const nodeSnippet = this.node.build( builder, convertTo );
+		const snippet = node.build( builder, type );
 
-		return `${ convertToSnippet }( ${ nodeSnippet } )`;
+		return builder.format( snippet, type, output );
 
 	}
 

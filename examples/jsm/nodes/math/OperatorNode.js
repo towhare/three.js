@@ -46,18 +46,18 @@ class OperatorNode extends TempNode {
 			return typeA;
 
 		} else if ( op === '&' || op === '|' || op === '^' || op === '>>' || op === '<<' ) {
-			
+
 			return 'int';
-			
+
 		} else if ( op === '==' || op === '&&' || op === '||' || op === '^^' ) {
 
 			return 'bool';
 
-		} else if ( op === '<=' || op === '>=' || op === '<' || op === '>' ) {
+		} else if ( op === '<' || op === '>' || op === '<=' || op === '>=' ) {
 
-			const length = builder.getTypeLength( output );
+			const typeLength = builder.getTypeLength( output );
 
-			return length > 1 ? `bvec${ length }` : 'bool';
+			return typeLength > 1 ? `bvec${ typeLength }` : 'bool';
 
 		} else {
 
@@ -112,6 +112,18 @@ class OperatorNode extends TempNode {
 
 				typeB = typeA;
 
+			} else if ( op === '<' || op === '>' || op === '<=' || op === '>=' ) {
+
+				if ( builder.isVector( typeA ) ) {
+
+					typeB = typeA;
+
+				} else {
+
+					typeA = typeB = 'float';
+
+				}
+
 			} else if ( builder.isMatrix( typeA ) && builder.isVector( typeB ) ) {
 
 				// matrix x vector
@@ -151,13 +163,21 @@ class OperatorNode extends TempNode {
 
 				return a;
 
-			} else if ( op === '>' && outputLength > 1 ) {
+			} else if ( op === '<' && outputLength > 1 ) {
 
-				return builder.format( `${ builder.getMethod( 'greaterThan' ) }( ${a}, ${b} )`, type, output );
+				return builder.format( `${ builder.getMethod( 'lessThan' ) }( ${a}, ${b} )`, type, output );
 
 			} else if ( op === '<=' && outputLength > 1 ) {
 
 				return builder.format( `${ builder.getMethod( 'lessThanEqual' ) }( ${a}, ${b} )`, type, output );
+
+			} else if ( op === '>' && outputLength > 1 ) {
+
+				return builder.format( `${ builder.getMethod( 'greaterThan' ) }( ${a}, ${b} )`, type, output );
+
+			} else if ( op === '>=' && outputLength > 1 ) {
+
+				return builder.format( `${ builder.getMethod( 'greaterThanEqual' ) }( ${a}, ${b} )`, type, output );
 
 			} else {
 
